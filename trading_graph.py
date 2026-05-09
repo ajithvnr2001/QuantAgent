@@ -17,7 +17,17 @@ from graph_setup import SetGraph
 from graph_util import TechnicalTools
 
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn")
+SUPPORTED_PROVIDERS = ("vultr", "openai", "anthropic", "qwen", "minimax", "minimax_cn")
+VULTR_PROVIDER_CONFIG = {
+    "label": "Vultr Inference",
+    "config_key": "vultr_api_key",
+    "env_keys": ("VULTR_API_KEY",),
+    "base_url_key": "vultr_base_url",
+    "model_key": "vultr_model",
+    "default_base_url": "https://api.vultrinference.com/v1",
+    "default_model": "deepseek-ai/DeepSeek-V4-Pro",
+    "console_url": "https://my.vultr.com/",
+}
 MINIMAX_PROVIDER_CONFIG = {
     "minimax": {
         "label": "MiniMax",
@@ -78,7 +88,7 @@ class TradingGraph:
         Get API key with proper validation and error handling.
         
         Args:
-            provider: The provider name ("openai", "anthropic", "qwen", "minimax", or "minimax_cn")
+            provider: The provider name ("vultr", "openai", "anthropic", "qwen", "minimax", or "minimax_cn")
         
         Returns:
             str: The API key for the specified provider
@@ -86,7 +96,35 @@ class TradingGraph:
         Raises:
             ValueError: If API key is missing or invalid
         """
-        if provider == "openai":
+        if provider == "vultr":
+            provider_config = VULTR_PROVIDER_CONFIG
+            api_key = self.config.get(provider_config["config_key"])
+
+            if not api_key:
+                for env_key in provider_config["env_keys"]:
+                    api_key = os.environ.get(env_key)
+                    if api_key:
+                        break
+
+            if not api_key:
+                env_exports = "\n".join(
+                    f"{idx}. Set environment variable: export {env_key}='your-key-here'"
+                    for idx, env_key in enumerate(provider_config["env_keys"], start=1)
+                )
+                raise ValueError(
+                    f"{provider_config['label']} API key not found. Please set it using one of these methods:\n"
+                    f"{env_exports}\n"
+                    f"{len(provider_config['env_keys']) + 1}. Update the config with: "
+                    f"config['{provider_config['config_key']}'] = 'your-key-here'\n"
+                    f"{len(provider_config['env_keys']) + 2}. Use the web interface to update the API key"
+                )
+
+            if api_key == "":
+                raise ValueError(
+                    f"Please provide your actual {provider_config['label']} API key. "
+                    f"You can get one from: {provider_config['console_url']}"
+                )
+        elif provider == "openai":
             # First check if API key is provided in config
             api_key = self.config.get("api_key")
             
@@ -190,8 +228,8 @@ class TradingGraph:
         Create an LLM instance based on the provider.
 
         Args:
-            provider: The provider name ("openai", "anthropic", "qwen", "minimax", or "minimax_cn")
-            model: The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022", "qwen-vl-max-latest", "MiniMax-M2.7")
+            provider: The provider name ("vultr", "openai", "anthropic", "qwen", "minimax", or "minimax_cn")
+            model: The model name (e.g., "deepseek-ai/DeepSeek-V4-Pro", "gpt-4o", "claude-3-5-sonnet-20241022", "qwen-vl-max-latest", "MiniMax-M2.7")
             temperature: The temperature setting for the model
 
         Returns:
@@ -199,7 +237,20 @@ class TradingGraph:
         """
         api_key = self._get_api_key(provider)
 
-        if provider == "openai":
+        if provider == "vultr":
+            return ChatOpenAI(
+                model=model or self.config.get(
+                    VULTR_PROVIDER_CONFIG["model_key"],
+                    VULTR_PROVIDER_CONFIG["default_model"],
+                ),
+                temperature=temperature,
+                api_key=api_key,
+                openai_api_base=self.config.get(
+                    VULTR_PROVIDER_CONFIG["base_url_key"],
+                    VULTR_PROVIDER_CONFIG["default_base_url"],
+                ),
+            )
+        elif provider == "openai":
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
@@ -293,7 +344,13 @@ class TradingGraph:
             api_key (str): The new API key
             provider (str): The provider name, defaults to "openai"
         """
-        if provider == "openai":
+        if provider == "vultr":
+            # Update the config with the new API key
+            self.config["vultr_api_key"] = api_key
+
+            # Also update the environment variable for consistency
+            os.environ["VULTR_API_KEY"] = api_key
+        elif provider == "openai":
             # Update the config with the new API key
             self.config["api_key"] = api_key
             

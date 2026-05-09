@@ -128,6 +128,11 @@ You can set it in our Web InterFace Later,
 
 Or set it as an environment variable:
 ```bash
+# For Vultr Inference (default in this fork)
+export VULTR_API_KEY="your_vultr_inference_key_here"
+export VULTR_BASE_URL="https://api.vultrinference.com/v1"
+export VULTR_MODEL="deepseek-ai/DeepSeek-V4-Pro"
+
 # For OpenAI
 export OPENAI_API_KEY="your_openai_api_key_here"
 
@@ -141,6 +146,9 @@ export DASHSCOPE_API_KEY="your_dashscope_api_key_here"
 export MINIMAX_API_KEY="your_minimax_api_key_here"
 
 ```
+
+This fork defaults to Vultr Inference with `deepseek-ai/DeepSeek-V4-Pro`.
+See [Indian Stocks + Vultr Setup](docs/INDIAN_STOCKS_VULTR_SETUP.md) for the full Indian-market workflow and validation commands.
 
 
 
@@ -158,11 +166,11 @@ The web application will be available at `http://127.0.0.1:5000`
 
 ### Web Interface Features
 
-1. **Asset Selection**: Choose from available stocks, crypto, commodities, and indices
+1. **Asset Selection**: Choose from Indian NSE/BSE stocks, indices, stocks, crypto, commodities, and futures
 2. **Timeframe Selection**: Analyze data from 1-minute to daily intervals
 3. **Date Range**: Select custom date ranges for analysis
 4. **Real-time Analysis**: Get comprehensive technical analysis with visualizations
-5. **API Key Management**: Update your OpenAI API key through the interface
+5. **API Key Management**: Update Vultr, OpenAI, Anthropic, Qwen, or MiniMax keys through the interface
 
 ## 📺 Demo
 
@@ -172,7 +180,7 @@ The web application will be available at `http://127.0.0.1:5000`
 ## 🔧 Implementation Details
 
 
-**Important Note**: Our model requires an LLM that can take images as input, as our agents generate and analyze visual charts for pattern recognition and trend analysis.
+**Important Note**: The original LangGraph agent path works best with an LLM that can take images as input, because the pattern and trend agents generate chart images. The Vultr Inference provider uses a text-first DeepSeek path so Indian-stock analysis works even when the configured endpoint does not accept image payloads.
 
 ### Python Usage
 

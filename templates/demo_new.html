@@ -947,6 +947,30 @@
                                         <i class="fas fa-coins"></i> Asset
                                     </label>
                                     <div class="asset-button-grid" id="assetButtonGrid">
+                                        <button type="button" class="asset-btn" data-asset="RELIANCE" onclick="selectAsset(this, 'RELIANCE')">
+                                            <i class="fas fa-industry"></i> RELIANCE
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="TCS" onclick="selectAsset(this, 'TCS')">
+                                            <i class="fas fa-building"></i> TCS
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="INFY" onclick="selectAsset(this, 'INFY')">
+                                            <i class="fas fa-laptop-code"></i> INFY
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="HDFCBANK" onclick="selectAsset(this, 'HDFCBANK')">
+                                            <i class="fas fa-university"></i> HDFCBANK
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="ICICIBANK" onclick="selectAsset(this, 'ICICIBANK')">
+                                            <i class="fas fa-university"></i> ICICIBANK
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="SBIN" onclick="selectAsset(this, 'SBIN')">
+                                            <i class="fas fa-university"></i> SBIN
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="NIFTY50" onclick="selectAsset(this, 'NIFTY50')">
+                                            <i class="fas fa-chart-line"></i> NIFTY50
+                                        </button>
+                                        <button type="button" class="asset-btn" data-asset="BANKNIFTY" onclick="selectAsset(this, 'BANKNIFTY')">
+                                            <i class="fas fa-chart-line"></i> BANKNIFTY
+                                        </button>
                                         <button type="button" class="asset-btn" data-asset="BTC" onclick="selectAsset(this, 'BTC')">
                                             <i class="fas fa-bitcoin"></i> BTC
                                         </button>
@@ -974,16 +998,16 @@
                                     <div id="customAssetDiv" class="mt-3" style="display: none;">
                                         <div class="alert alert-info">
                                             <h6><i class="fas fa-plus-circle"></i> Custom Asset Symbol</h6>
-                                            <p class="mb-2"><strong>💡 Examples:</strong> NQ (Nasdaq-100 Futures), ZN (10-Year Treasury), etc.</p>
-                                            <p class="mb-0"><strong>📝 Format:</strong> Enter the Yahoo Finance symbol for your asset</p>
+                                            <p class="mb-2"><strong>💡 Examples:</strong> RELIANCE, TCS, M&amp;M, HEG, RELIANCE.NS, 500325.BO</p>
+                                            <p class="mb-0"><strong>📝 Format:</strong> Plain NSE symbols are converted to Yahoo Finance .NS symbols</p>
                                         </div>
                                         <div class="input-group">
-                                            <input type="text" class="form-control" id="customAssetInput" placeholder="Enter symbol (e.g., NQ=F, ZN=F, ^VIX)">
+                                            <input type="text" class="form-control" id="customAssetInput" placeholder="Enter Indian stock symbol (e.g., RELIANCE, TCS, HEG)">
                                             <button class="btn btn-outline-primary" type="button" onclick="confirmCustomAsset()">
                                                 <i class="fas fa-check"></i> Confirm
                                             </button>
                                         </div>
-                                        <small class="form-text text-muted">Use Yahoo Finance symbols. For futures, add =F suffix (e.g., NQ=F)</small>
+                                        <small class="form-text text-muted">NSE symbols default to .NS. Use .BO for BSE or any Yahoo symbol such as ^NSEI.</small>
                                     </div>
                                 </div>
                                 
@@ -1042,14 +1066,14 @@
                                 <!-- Time Selector -->
                                 <div class="form-group">
                                     <label class="form-label" style="font-size: 1.2rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">
-                                        <i class="fas fa-clock" style="color: #6B7280; margin-right: 0.5rem;"></i> Time Selector
+                                        <i class="fas fa-clock" style="color: #6B7280; margin-right: 0.5rem;"></i> Market Session
                                     </label>
                                     <div class="row">
                                         <div class="col-md-6">
-                                            <input type="time" id="startTime" class="form-control" value="00:00" step="60" style="font-size: 1.1rem; padding: 0.875rem 1rem; border: 2px solid #E5E7EB; border-radius: 8px;">
+                                            <input type="time" id="startTime" class="form-control" value="09:00" step="60" style="font-size: 1.1rem; padding: 0.875rem 1rem; border: 2px solid #E5E7EB; border-radius: 8px;">
                                         </div>
                                         <div class="col-md-6">
-                                            <input type="time" id="endTime" class="form-control" value="23:59" step="60" style="font-size: 1.1rem; padding: 0.875rem 1rem; border: 2px solid #E5E7EB; border-radius: 8px;">
+                                            <input type="time" id="endTime" class="form-control" value="16:30" step="60" style="font-size: 1.1rem; padding: 0.875rem 1rem; border: 2px solid #E5E7EB; border-radius: 8px;">
                                         </div>
                                     </div>
                                 </div>
@@ -1057,7 +1081,7 @@
                                 <!-- Current Time Option -->
                                 <div class="form-group">
                                     <div class="form-check" style="margin-top: 1rem;">
-                                        <input class="form-check-input" type="checkbox" id="useCurrentTime" checked style="transform: scale(1.2); margin-right: 0.75rem;">
+                                        <input class="form-check-input" type="checkbox" id="useCurrentTime" style="transform: scale(1.2); margin-right: 0.75rem;">
                                         <label class="form-check-label" for="useCurrentTime" style="font-size: 1.3rem; font-weight: 500; color: #374151; cursor: pointer;">
                                             Use current date & time for end
                                         </label>
@@ -1088,16 +1112,28 @@
                                 <div class="form-group">
                                     <label class="form-label">LLM Provider</label>
                                     <select class="form-control" id="llmProviderSelect" onchange="handleProviderChange()">
-                                        <option value="openai" selected>OpenAI</option>
+                                        <option value="vultr" selected>Vultr Inference</option>
+                                        <option value="openai">OpenAI</option>
                                         <option value="anthropic">Claude (Anthropic)</option>
                                         <option value="qwen">Qwen</option>
                                         <option value="minimax">MiniMax</option>
                                         <option value="minimax_cn">MiniMax CN</option>
                                     </select>
                                 </div>
+
+                                <!-- Vultr API Key Input -->
+                                <div class="form-group" id="vultrApiKeyGroup">
+                                    <label class="form-label">Vultr Inference API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="vultrApiKeyInput" placeholder="Enter your Vultr Inference API key">
+                                        <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('vultr')">
+                                            <i class="fas fa-save"></i> Update
+                                        </button>
+                                    </div>
+                                </div>
                                 
                                 <!-- OpenAI API Key Input -->
-                                <div class="form-group" id="openaiApiKeyGroup">
+                                <div class="form-group" id="openaiApiKeyGroup" style="display: none;">
                                     <label class="form-label">OpenAI API Key</label>
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="openaiApiKeyInput" placeholder="Enter your OpenAI API key">
@@ -1226,6 +1262,65 @@
             SELECTED_TIMEFRAME: 'quantagent_selected_timeframe'
         };
 
+        const MARKET_START_TIME = '09:00';
+        const MARKET_END_TIME = '16:30';
+        const TIMEFRAME_HISTORY_DAYS = {
+            '1m': 7,
+            '15m': 60,
+            '1h': 730,
+            '4h': 730,
+            '1d': 3650,
+            '1w': 3650,
+            '1mo': 7300
+        };
+
+        function formatDateInput(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function getLastCompletedMarketDate() {
+            const now = new Date();
+            const [endHour, endMinute] = MARKET_END_TIME.split(':').map(Number);
+            const sessionEnd = new Date(now);
+            sessionEnd.setHours(endHour, endMinute, 0, 0);
+
+            const endDate = new Date(now);
+            if (now < sessionEnd) {
+                endDate.setDate(endDate.getDate() - 1);
+            }
+            return endDate;
+        }
+
+        function applyMarketSessionDefaults(timeframe) {
+            const startTimeInput = document.getElementById('startTime');
+            const endTimeInput = document.getElementById('endTime');
+            const startDateInput = document.getElementById('startDate');
+            const endDateInput = document.getElementById('endDate');
+            const useCurrentTime = document.getElementById('useCurrentTime');
+
+            if (!startTimeInput || !endTimeInput || !startDateInput || !endDateInput) return;
+
+            if (useCurrentTime) {
+                useCurrentTime.checked = false;
+            }
+
+            startTimeInput.value = MARKET_START_TIME;
+            endTimeInput.value = MARKET_END_TIME;
+
+            const endDate = getLastCompletedMarketDate();
+            const startDate = new Date(endDate);
+            const historyDays = TIMEFRAME_HISTORY_DAYS[timeframe] || 730;
+            startDate.setDate(startDate.getDate() - Math.max(historyDays - 1, 0));
+
+            startDateInput.value = formatDateInput(startDate);
+            endDateInput.value = formatDateInput(endDate);
+            handleUseCurrentTimeChange();
+            validateDateRange();
+        }
+
         // Add or render a custom asset button into the grid
         function addCustomAssetButton(symbol, isServerLoaded = false) {
             const grid = document.getElementById('assetButtonGrid');
@@ -1304,7 +1399,7 @@
             }
 
             // Normalize (trim)
-            const symbol = customAsset;
+            const symbol = customAsset.trim().toUpperCase();
 
             // Save to localStorage list
             try {
@@ -1396,29 +1491,11 @@
             }
 
             console.log('Selected timeframe:', timeframe);
+            applyMarketSessionDefaults(timeframe);
         }
 
         // On page load, restore selected asset/timeframe and custom assets
         document.addEventListener('DOMContentLoaded', function() {
-            // Set default dates
-            const now = new Date();
-            const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
-            
-            // Format dates for input fields
-            const formatDate = (date) => {
-                return date.toISOString().split('T')[0];
-            };
-            
-            // Set default start date (30 days ago)
-            document.getElementById('startDate').value = formatDate(thirtyDaysAgo);
-            
-            // Set default end date (today)
-            document.getElementById('endDate').value = formatDate(now);
-            
-            // Apply the current-time checkbox behavior immediately on load
-            // (this will disable & populate end date/time if the checkbox is checked by default)
-            try { handleUseCurrentTimeChange(); } catch (e) { console.warn('handleUseCurrentTimeChange not available yet', e); }
-            
             // Load custom assets and server-synced assets
             loadCustomAssets();
 
@@ -1459,15 +1536,17 @@
                         defaultTimeframeBtn.classList.add('active');
                         selectedTimeframe = '1h';
                     }
-                    const defaultAssetBtn = document.querySelector('[data-asset="BTC"]');
+                    const defaultAssetBtn = document.querySelector('[data-asset="RELIANCE"]');
                     if (defaultAssetBtn && !selectedAsset) {
                         defaultAssetBtn.classList.add('active');
-                        selectedAsset = 'BTC';
+                        selectedAsset = 'RELIANCE';
                     }
                 }
             } catch (e) {
                 console.warn('Could not restore selected asset from localStorage', e);
             }
+
+            applyMarketSessionDefaults(selectedTimeframe || '1h');
 
             document.getElementById('useCurrentTime').addEventListener('change', handleUseCurrentTimeChange);
             
@@ -1499,7 +1578,7 @@
             checkApiKeyStatus();
             
             // Set initial provider dropdown state
-            const savedProvider = localStorage.getItem('quantagent_provider') || 'openai';
+            const savedProvider = localStorage.getItem('quantagent_provider') || 'vultr';
             if (savedProvider) {
                 document.getElementById('llmProviderSelect').value = savedProvider;
                 handleProviderChange();
@@ -1507,7 +1586,7 @@
         });
         
         function checkApiKeyStatus() {
-            const provider = document.getElementById('llmProviderSelect')?.value || 'openai';
+            const provider = document.getElementById('llmProviderSelect')?.value || 'vultr';
             fetch(`/api/get-api-key-status?provider=${provider}`)
                 .then(response => {
                     if (!response.ok) {
@@ -1517,6 +1596,7 @@
                 })
                 .then(data => {
                     const providerNames = {
+                        'vultr': 'Vultr Inference',
                         'openai': 'OpenAI',
                         'anthropic': 'Anthropic',
                         'qwen': 'Qwen',
@@ -1597,7 +1677,7 @@
              }
 
              // Normalize (trim)
-             const symbol = customAsset;
+             const symbol = customAsset.trim().toUpperCase();
 
              // Save to localStorage list
              try {
@@ -1745,7 +1825,7 @@
                 
                 // Set to current date and time
                 const now = new Date();
-                const currentDate = now.toISOString().split('T')[0];
+                const currentDate = formatDateInput(now);
                 const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
                 
                 endDateInput.value = currentDate;
@@ -1760,6 +1840,7 @@
                 endDateInput.disabled = false;
                 endTimeInput.style.opacity = '1';
                 endDateInput.style.opacity = '1';
+                endTimeInput.value = MARKET_END_TIME;
                 
                 // Remove visual indication
                 endDateInput.title = '';
@@ -1771,7 +1852,7 @@
             const useCurrentTime = document.getElementById('useCurrentTime');
             if (useCurrentTime.checked) {
                 const now = new Date();
-                const currentDate = now.toISOString().split('T')[0];
+                const currentDate = formatDateInput(now);
                 const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
                 
                 document.getElementById('endDate').value = currentDate;
@@ -1805,6 +1886,7 @@
          // Provider and API Key Management Functions
          function handleProviderChange() {
              const provider = document.getElementById('llmProviderSelect').value;
+             const vultrGroup = document.getElementById('vultrApiKeyGroup');
              const openaiGroup = document.getElementById('openaiApiKeyGroup');
              const anthropicGroup = document.getElementById('anthropicApiKeyGroup');
              const qwenGroup = document.getElementById('qwenApiKeyGroup');
@@ -1812,6 +1894,7 @@
              const minimaxCnGroup = document.getElementById('minimaxCnApiKeyGroup');
 
              // Hide all groups first
+             vultrGroup.style.display = 'none';
              openaiGroup.style.display = 'none';
              anthropicGroup.style.display = 'none';
              qwenGroup.style.display = 'none';
@@ -1819,7 +1902,9 @@
              minimaxCnGroup.style.display = 'none';
 
              // Show the selected provider's group
-             if (provider === 'openai') {
+             if (provider === 'vultr') {
+                 vultrGroup.style.display = 'block';
+             } else if (provider === 'openai') {
                  openaiGroup.style.display = 'block';
              } else if (provider === 'anthropic') {
                  anthropicGroup.style.display = 'block';
@@ -1867,7 +1952,9 @@
              const actualProvider = provider || providerSelect.value;
              
              let apiKey;
-             if (actualProvider === 'openai') {
+             if (actualProvider === 'vultr') {
+                 apiKey = document.getElementById('vultrApiKeyInput').value.trim();
+             } else if (actualProvider === 'openai') {
                  apiKey = document.getElementById('openaiApiKeyInput').value.trim();
              } else if (actualProvider === 'anthropic') {
                  apiKey = document.getElementById('anthropicApiKeyInput').value.trim();
@@ -1908,6 +1995,7 @@
              .then(data => {
                  if (data.success) {
                      const providerNames = {
+                         'vultr': 'Vultr Inference',
                          'openai': 'OpenAI',
                          'anthropic': 'Anthropic',
                          'qwen': 'Qwen',
@@ -1915,7 +2003,9 @@
                          'minimax_cn': 'MiniMax CN'
                      };
                      showApiKeySuccess(`${providerNames[actualProvider] || actualProvider} API key updated successfully!`);
-                     if (actualProvider === 'openai') {
+                     if (actualProvider === 'vultr') {
+                         document.getElementById('vultrApiKeyInput').value = '';
+                     } else if (actualProvider === 'openai') {
                          document.getElementById('openaiApiKeyInput').value = '';
                      } else if (actualProvider === 'anthropic') {
                          document.getElementById('anthropicApiKeyInput').value = '';

@@ -6,6 +6,8 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from openai import RateLimitError
 
+from llm_fallbacks import format_kline_rows, is_image_input_error
+
 
 def invoke_tool_with_retry(tool_fn, tool_args, retries=3, wait_sec=4):
     """
@@ -59,19 +61,24 @@ def create_pattern_agent(tool_llm, graph_llm, toolkit):
 
         # --- Retry wrapper for LLM invocation ---
         def invoke_with_retry(call_fn, *args, retries=3, wait_sec=8):
+            last_error = None
             for attempt in range(retries):
                 try:
                     return call_fn(*args)
                 except RateLimitError:
+                    last_error = None
                     print(
                         f"Rate limit hit, retrying in {wait_sec}s (attempt {attempt + 1}/{retries})..."
                     )
                     time.sleep(wait_sec)
                 except Exception as e:
+                    last_error = e
                     print(
                         f"Other error: {e}, retrying in {wait_sec}s (attempt {attempt + 1}/{retries})..."
                     )
                     time.sleep(wait_sec)
+            if last_error is not None:
+                raise last_error
             raise RuntimeError("Max retries exceeded")
 
         messages = state.get("messages", [])
@@ -164,7 +171,25 @@ def create_pattern_agent(tool_llm, graph_llm, toolkit):
                 error_str = str(e)
                 # Handle Anthropic's "at least one message is required" error
                 # This can happen when SystemMessage extraction leaves empty messages array
-                if "at least one message" in error_str.lower():
+                if is_image_input_error(e):
+                    print("Image input was rejected, retrying pattern analysis with OHLC text.")
+                    text_messages = [
+                        SystemMessage(
+                            content="You are a trading pattern recognition assistant tasked with analyzing OHLC candlestick data."
+                        ),
+                        HumanMessage(
+                            content=(
+                                f"This is recent {time_frame} OHLC data.\n\n"
+                                f"{pattern_text}\n\n"
+                                "Determine whether the data matches any of the listed candlestick patterns. "
+                                "Clearly name the matched pattern(s), and explain your reasoning based on price structure.\n\n"
+                                f"{format_kline_rows(state['kline_data'])}"
+                            )
+                        ),
+                    ]
+                    final_response = invoke_with_retry(graph_llm.invoke, text_messages)
+                    messages = text_messages
+                elif "at least one message" in error_str.lower():
                     # Retry with only HumanMessage (SystemMessage will be lost but Anthropic should work)
                     print("Retrying with HumanMessage only due to Anthropic message conversion issue...")
                     final_response = invoke_with_retry(

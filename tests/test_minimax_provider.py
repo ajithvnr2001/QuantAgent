@@ -68,6 +68,14 @@ from default_config import DEFAULT_CONFIG
 class TestDefaultConfig(unittest.TestCase):
     """Tests for MiniMax fields in DEFAULT_CONFIG."""
 
+    def test_vultr_defaults_exist(self):
+        """DEFAULT_CONFIG should contain Vultr Inference defaults."""
+        self.assertEqual(DEFAULT_CONFIG["agent_llm_provider"], "vultr")
+        self.assertEqual(DEFAULT_CONFIG["graph_llm_provider"], "vultr")
+        self.assertEqual(DEFAULT_CONFIG["vultr_base_url"], "https://api.vultrinference.com/v1")
+        self.assertEqual(DEFAULT_CONFIG["vultr_model"], "deepseek-ai/DeepSeek-V4-Pro")
+        self.assertIn("vultr_api_key", DEFAULT_CONFIG)
+
     def test_minimax_api_key_field_exists(self):
         """DEFAULT_CONFIG should contain a minimax_api_key field."""
         self.assertIn("minimax_api_key", DEFAULT_CONFIG)
@@ -89,6 +97,11 @@ class TestDefaultConfig(unittest.TestCase):
         self.assertEqual(config["agent_llm_provider"], "minimax_cn")
         self.assertEqual(config["graph_llm_provider"], "minimax_cn")
 
+        config["agent_llm_provider"] = "vultr"
+        config["graph_llm_provider"] = "vultr"
+        self.assertEqual(config["agent_llm_provider"], "vultr")
+        self.assertEqual(config["graph_llm_provider"], "vultr")
+
 
 class TestTradingGraphGetApiKey(unittest.TestCase):
     """Tests for TradingGraph._get_api_key() with minimax provider."""
@@ -101,6 +114,33 @@ class TestTradingGraphGetApiKey(unittest.TestCase):
         tg = TradingGraph(config=config)
         TradingGraph._create_llm = orig_create
         return tg
+
+    def test_get_api_key_vultr_from_config(self):
+        """Should return vultr_api_key from config."""
+        config = DEFAULT_CONFIG.copy()
+        config["vultr_api_key"] = "test-vultr-key-123"
+        tg = self._make_graph(config)
+        key = tg._get_api_key("vultr")
+        self.assertEqual(key, "test-vultr-key-123")
+
+    def test_get_api_key_vultr_from_env(self):
+        """Should fall back to VULTR_API_KEY env var."""
+        config = DEFAULT_CONFIG.copy()
+        config["vultr_api_key"] = ""
+        tg = self._make_graph(config)
+        with patch.dict(os.environ, {"VULTR_API_KEY": "env-vultr-key"}, clear=True):
+            key = tg._get_api_key("vultr")
+            self.assertEqual(key, "env-vultr-key")
+
+    def test_get_api_key_vultr_missing_raises(self):
+        """Should raise ValueError if no Vultr API key is available."""
+        config = DEFAULT_CONFIG.copy()
+        config["vultr_api_key"] = ""
+        tg = self._make_graph(config)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                tg._get_api_key("vultr")
+            self.assertIn("Vultr", str(ctx.exception))
 
     def test_get_api_key_from_config(self):
         """Should return minimax_api_key from config."""
@@ -177,6 +217,26 @@ class TestTradingGraphCreateLlm(unittest.TestCase):
         tg = TradingGraph(config=config)
         TradingGraph._create_llm = orig_create
         return tg
+
+    @patch("trading_graph.ChatOpenAI")
+    def test_create_llm_vultr_uses_chatopenai_custom_base(self, mock_openai):
+        """Vultr provider should create ChatOpenAI with Vultr base URL."""
+        config = DEFAULT_CONFIG.copy()
+        config["vultr_api_key"] = "test-vultr-key"
+        config["vultr_base_url"] = "https://api.vultrinference.com/v1"
+        tg = self._make_graph(config)
+        tg.config = config
+
+        mock_openai.return_value = MagicMock()
+        result = tg._create_llm("vultr", "deepseek-ai/DeepSeek-V4-Pro", 0.1)
+
+        self.assertIs(result, mock_openai.return_value)
+        mock_openai.assert_called_once_with(
+            model="deepseek-ai/DeepSeek-V4-Pro",
+            temperature=0.1,
+            api_key="test-vultr-key",
+            openai_api_base="https://api.vultrinference.com/v1",
+        )
 
     @patch("trading_graph.ChatOpenAI")
     def test_create_llm_minimax_uses_chatopenai(self, mock_openai):
@@ -266,6 +326,22 @@ class TestTradingGraphUpdateApiKey(unittest.TestCase):
         TradingGraph._create_llm = orig_create
         return tg
 
+    def test_update_api_key_vultr(self):
+        """update_api_key('vultr') should update config and env var."""
+        config = DEFAULT_CONFIG.copy()
+        config["vultr_api_key"] = ""
+        config["agent_llm_provider"] = "vultr"
+        config["graph_llm_provider"] = "vultr"
+        config["agent_llm_model"] = "deepseek-ai/DeepSeek-V4-Pro"
+        config["graph_llm_model"] = "deepseek-ai/DeepSeek-V4-Pro"
+        tg = self._make_graph(config)
+
+        with patch.object(tg, "refresh_llms"):
+            tg.update_api_key("new-vultr-key", provider="vultr")
+
+        self.assertEqual(tg.config["vultr_api_key"], "new-vultr-key")
+        self.assertEqual(os.environ.get("VULTR_API_KEY"), "new-vultr-key")
+
     def test_update_api_key_minimax(self):
         """update_api_key('minimax') should update config and env var."""
         config = DEFAULT_CONFIG.copy()
@@ -309,6 +385,30 @@ class TestTradingGraphUpdateApiKey(unittest.TestCase):
 
 class TestTradingGraphRefreshLlms(unittest.TestCase):
     """Tests for TradingGraph.refresh_llms() with minimax provider."""
+
+    @patch("trading_graph.ChatOpenAI")
+    @patch("trading_graph.ChatAnthropic")
+    @patch("trading_graph.ChatQwen")
+    def test_refresh_llms_vultr(self, mock_qwen, mock_anthropic, mock_openai):
+        """refresh_llms() should recreate LLMs when provider is vultr."""
+        from trading_graph import TradingGraph
+
+        config = DEFAULT_CONFIG.copy()
+        config["agent_llm_provider"] = "vultr"
+        config["graph_llm_provider"] = "vultr"
+        config["agent_llm_model"] = "deepseek-ai/DeepSeek-V4-Pro"
+        config["graph_llm_model"] = "deepseek-ai/DeepSeek-V4-Pro"
+        config["vultr_api_key"] = "test-vultr-key"
+
+        mock_openai.return_value = MagicMock()
+        tg = TradingGraph(config=config)
+
+        mock_openai.reset_mock()
+        tg.refresh_llms()
+
+        self.assertEqual(mock_openai.call_count, 2)
+        for call in mock_openai.call_args_list:
+            self.assertEqual(call.kwargs["openai_api_base"], "https://api.vultrinference.com/v1")
 
     @patch("trading_graph.ChatOpenAI")
     @patch("trading_graph.ChatAnthropic")
@@ -362,6 +462,29 @@ class TestTradingGraphRefreshLlms(unittest.TestCase):
 
 class TestWebInterfaceProviderUpdate(unittest.TestCase):
     """Tests for web interface provider update with MiniMax."""
+
+    @patch("web_interface.TradingGraph")
+    def test_update_provider_vultr(self, mock_tg_class):
+        """POST /api/update-provider with vultr should set DeepSeek defaults."""
+        mock_tg = MagicMock()
+        mock_tg.config = DEFAULT_CONFIG.copy()
+        mock_tg_class.return_value = mock_tg
+
+        from web_interface import app, analyzer
+        analyzer.config = DEFAULT_CONFIG.copy()
+        analyzer.trading_graph = mock_tg
+        analyzer.save_llm_config = MagicMock(return_value=True)
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/update-provider",
+            json={"provider": "vultr"},
+            content_type="application/json",
+        )
+        data = resp.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(analyzer.config["agent_llm_model"], "deepseek-ai/DeepSeek-V4-Pro")
+        self.assertEqual(analyzer.config["graph_llm_model"], "deepseek-ai/DeepSeek-V4-Pro")
 
     @patch("web_interface.TradingGraph")
     def test_update_provider_minimax(self, mock_tg_class):
@@ -431,6 +554,30 @@ class TestWebInterfaceProviderUpdate(unittest.TestCase):
         self.assertIn("error", data)
 
     @patch("web_interface.TradingGraph")
+    def test_update_api_key_vultr(self, mock_tg_class):
+        """POST /api/update-api-key with vultr should set env var and provider."""
+        mock_tg = MagicMock()
+        mock_tg.config = DEFAULT_CONFIG.copy()
+        mock_tg_class.return_value = mock_tg
+
+        from web_interface import app, analyzer
+        analyzer.config = DEFAULT_CONFIG.copy()
+        analyzer.trading_graph = mock_tg
+        analyzer.save_llm_config = MagicMock(return_value=True)
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/update-api-key",
+            json={"api_key": "test-vultr-key", "provider": "vultr"},
+            content_type="application/json",
+        )
+        data = resp.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(os.environ.get("VULTR_API_KEY"), "test-vultr-key")
+        self.assertEqual(analyzer.config["agent_llm_provider"], "vultr")
+        self.assertEqual(analyzer.config["graph_llm_provider"], "vultr")
+
+    @patch("web_interface.TradingGraph")
     def test_update_api_key_minimax(self, mock_tg_class):
         """POST /api/update-api-key with minimax should set env var."""
         mock_tg = MagicMock()
@@ -481,6 +628,27 @@ class TestWebInterfaceProviderUpdate(unittest.TestCase):
         self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M2.7")
         self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M2.7")
         self.assertEqual(mock_tg.config["agent_llm_provider"], "minimax_cn")
+
+    @patch("web_interface.TradingGraph")
+    def test_get_api_key_status_vultr(self, mock_tg_class):
+        """GET /api/get-api-key-status?provider=vultr should work."""
+        mock_tg = MagicMock()
+        mock_tg.config = DEFAULT_CONFIG.copy()
+        mock_tg_class.return_value = mock_tg
+
+        from web_interface import app, analyzer
+        config = DEFAULT_CONFIG.copy()
+        config["vultr_api_key"] = "test-vultr-key-12345"
+        analyzer.config = config
+        analyzer.trading_graph = mock_tg
+        analyzer.save_llm_config = MagicMock(return_value=True)
+
+        with patch.dict(os.environ, {}, clear=True):
+            client = app.test_client()
+            resp = client.get("/api/get-api-key-status?provider=vultr")
+        data = resp.get_json()
+        self.assertTrue(data.get("has_key"))
+        self.assertIn("masked_key", data)
 
     @patch("web_interface.TradingGraph")
     def test_get_api_key_status_minimax(self, mock_tg_class):

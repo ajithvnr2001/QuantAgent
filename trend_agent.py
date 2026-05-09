@@ -9,27 +9,34 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from openai import RateLimitError
 
+from llm_fallbacks import format_kline_rows, is_image_input_error
+
 
 # --- Retry wrapper for LLM invocation ---
 def invoke_with_retry(call_fn, *args, retries=3, wait_sec=4):
     """
     Retry a function call with exponential backoff for rate limits or errors.
     """
+    last_error = None
     for attempt in range(retries):
         try:
             result = call_fn(*args)
             return result
         except RateLimitError:
+            last_error = None
             print(
                 f"Rate limit hit, retrying in {wait_sec}s (attempt {attempt + 1}/{retries})..."
             )
         except Exception as e:
+            last_error = e
             print(
                 f"Other error: {e}, retrying in {wait_sec}s (attempt {attempt + 1}/{retries})..."
             )
         # Only sleep if not the last attempt
         if attempt < retries - 1:
             time.sleep(wait_sec)
+    if last_error is not None:
+        raise last_error
     raise RuntimeError("Max retries exceeded")
 
 
@@ -141,7 +148,24 @@ def create_trend_agent(tool_llm, graph_llm, toolkit):
                 error_str = str(e)
                 # Handle Anthropic's "at least one message is required" error
                 # This can happen when SystemMessage extraction leaves empty messages array
-                if "at least one message" in error_str.lower():
+                if is_image_input_error(e):
+                    print("Image input was rejected, retrying trend analysis with OHLC text.")
+                    text_messages = [
+                        SystemMessage(
+                            content="You are a K-line trend pattern recognition assistant operating in a high-frequency trading context."
+                        ),
+                        HumanMessage(
+                            content=(
+                                f"This is recent {time_frame} OHLC data. "
+                                "Analyze support/resistance behavior, trendline bias, recent candle behavior, "
+                                "and predict the likely short-term trend: upward, downward, or sideways.\n\n"
+                                f"{format_kline_rows(state['kline_data'])}"
+                            )
+                        ),
+                    ]
+                    final_response = invoke_with_retry(graph_llm.invoke, text_messages)
+                    messages = text_messages
+                elif "at least one message" in error_str.lower():
                     # Retry with only HumanMessage (SystemMessage will be lost but Anthropic should work)
                     print("Retrying with HumanMessage only due to Anthropic message conversion issue...")
                     final_response = invoke_with_retry(

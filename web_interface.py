@@ -12,17 +12,34 @@ from flask import Flask, jsonify, render_template, request, send_file
 from openai import OpenAI
 
 import static_util
+from indian_market import (
+    UniverseLoadError,
+    load_all_nse_symbols,
+    resolve_yahoo_symbol,
+    to_yahoo_indian_symbol,
+)
+from llm_fallbacks import format_kline_rows
 from trading_graph import TradingGraph
 
 app = Flask(__name__)
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn")
+SUPPORTED_PROVIDERS = ("vultr", "openai", "anthropic", "qwen", "minimax", "minimax_cn")
 PROVIDER_DISPLAY_NAMES = {
+    "vultr": "Vultr Inference",
     "openai": "OpenAI",
     "anthropic": "Anthropic",
     "qwen": "Qwen",
     "minimax": "MiniMax",
     "minimax_cn": "MiniMax CN",
+}
+VULTR_PROVIDER_CONFIG = {
+    "config_key": "vultr_api_key",
+    "env_key": "VULTR_API_KEY",
+    "base_url_key": "vultr_base_url",
+    "model_key": "vultr_model",
+    "default_base_url": "https://api.vultrinference.com/v1",
+    "validation_model": "deepseek-ai/DeepSeek-V4-Pro",
+    "default_model": "deepseek-ai/DeepSeek-V4-Pro",
 }
 MINIMAX_PROVIDER_CONFIG = {
     "minimax": {
@@ -46,7 +63,14 @@ MINIMAX_PROVIDER_CONFIG = {
 
 def apply_provider_defaults(config: Dict[str, Any], provider: str) -> None:
     """Set provider-specific default models in a config dictionary."""
-    if provider == "anthropic":
+    if provider == "vultr":
+        vultr_model = config.get(
+            VULTR_PROVIDER_CONFIG["model_key"],
+            VULTR_PROVIDER_CONFIG["default_model"],
+        )
+        config["agent_llm_model"] = vultr_model
+        config["graph_llm_model"] = vultr_model
+    elif provider == "anthropic":
         if not config["agent_llm_model"].startswith("claude"):
             config["agent_llm_model"] = "claude-haiku-4-5-20251001"
         if not config["graph_llm_model"].startswith("claude"):
@@ -61,9 +85,13 @@ def apply_provider_defaults(config: Dict[str, Any], provider: str) -> None:
         config["agent_llm_model"] = minimax_model
         config["graph_llm_model"] = minimax_model
     elif provider == "openai":
-        if config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax")):
+        if config["agent_llm_model"].startswith(
+            ("claude", "qwen", "MiniMax", "deepseek-ai/")
+        ):
             config["agent_llm_model"] = "gpt-4o-mini"
-        if config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax")):
+        if config["graph_llm_model"].startswith(
+            ("claude", "qwen", "MiniMax", "deepseek-ai/")
+        ):
             config["graph_llm_model"] = "gpt-4o"
 
 
@@ -89,8 +117,20 @@ class WebTradingAnalyzer:
 
         # Available assets and their display names
         self.asset_mapping = {
+            "RELIANCE": "Reliance Industries (NSE)",
+            "TCS": "Tata Consultancy Services (NSE)",
+            "INFY": "Infosys (NSE)",
+            "HDFCBANK": "HDFC Bank (NSE)",
+            "ICICIBANK": "ICICI Bank (NSE)",
+            "SBIN": "State Bank of India (NSE)",
+            "ITC": "ITC (NSE)",
+            "LT": "Larsen & Toubro (NSE)",
+            "NIFTY50": "Nifty 50 Index",
+            "BANKNIFTY": "Nifty Bank Index",
+            "SENSEX": "BSE Sensex Index",
             "SPX": "S&P 500",
             "BTC": "Bitcoin",
+            "ETH": "Ethereum",
             "GC": "Gold Futures",
             "NQ": "Nasdaq Futures",
             "CL": "Crude Oil",
@@ -99,14 +139,28 @@ class WebTradingAnalyzer:
             "QQQ": "Invesco QQQ Trust",
             "VIX": "Volatility Index",
             "DXY": "US Dollar Index",
-            "AAPL": "Apple Inc.",  # New asset
-            "TSLA": "Tesla Inc.",  # New asset
+            "AAPL": "Apple Inc.",
+            "GOOGL": "Alphabet Inc.",
+            "MSFT": "Microsoft Corp.",
+            "TSLA": "Tesla Inc.",
         }
 
         # Yahoo Finance symbol mapping
         self.yfinance_symbols = {
+            "RELIANCE": "RELIANCE.NS",
+            "TCS": "TCS.NS",
+            "INFY": "INFY.NS",
+            "HDFCBANK": "HDFCBANK.NS",
+            "ICICIBANK": "ICICIBANK.NS",
+            "SBIN": "SBIN.NS",
+            "ITC": "ITC.NS",
+            "LT": "LT.NS",
+            "NIFTY50": "^NSEI",
+            "BANKNIFTY": "^NSEBANK",
+            "SENSEX": "^BSESN",
             "SPX": "^GSPC",  # S&P 500
             "BTC": "BTC-USD",  # Bitcoin
+            "ETH": "ETH-USD",  # Ethereum
             "GC": "GC=F",  # Gold Futures
             "NQ": "NQ=F",  # Nasdaq Futures
             "CL": "CL=F",  # Crude Oil
@@ -115,6 +169,10 @@ class WebTradingAnalyzer:
             "QQQ": "QQQ",  # Invesco QQQ Trust
             "VIX": "^VIX",  # Volatility Index
             "DXY": "DX-Y.NYB",  # US Dollar Index
+            "AAPL": "AAPL",
+            "GOOGL": "GOOGL",
+            "MSFT": "MSFT",
+            "TSLA": "TSLA",
         }
 
         # Yahoo Finance interval mapping
@@ -134,12 +192,25 @@ class WebTradingAnalyzer:
         self.custom_assets_file = self.data_dir / "custom_assets.json"
         self.custom_assets = self.load_custom_assets()
 
+    def resolve_asset_to_yahoo_symbol(self, symbol: str) -> str:
+        """Resolve app asset codes and plain Indian symbols to Yahoo Finance symbols."""
+        return resolve_yahoo_symbol(symbol, self.yfinance_symbols)
+
+    def canonicalize_asset_symbol(self, symbol: str) -> str:
+        """Normalize user-entered assets for storage and repeat selection."""
+        clean = (symbol or "").strip().upper()
+        if not clean:
+            return ""
+        if clean in self.yfinance_symbols:
+            return clean
+        return to_yahoo_indian_symbol(clean)
+
     def fetch_yfinance_data(
         self, symbol: str, interval: str, start_date: str, end_date: str
     ) -> pd.DataFrame:
         """Fetch OHLCV data from Yahoo Finance."""
         try:
-            yf_symbol = self.yfinance_symbols.get(symbol, symbol)
+            yf_symbol = self.resolve_asset_to_yahoo_symbol(symbol)
             yf_interval = self.yfinance_intervals.get(interval, interval)
 
             df = yf.download(
@@ -205,7 +276,7 @@ class WebTradingAnalyzer:
     ) -> pd.DataFrame:
         """Fetch OHLCV data from Yahoo Finance using datetime objects for exact time precision."""
         try:
-            yf_symbol = self.yfinance_symbols.get(symbol, symbol)
+            yf_symbol = self.resolve_asset_to_yahoo_symbol(symbol)
             yf_interval = self.yfinance_intervals.get(interval, interval)
 
             print(
@@ -290,11 +361,182 @@ class WebTradingAnalyzer:
         files = list(asset_dir.glob(pattern))
         return sorted(files)
 
+    def format_display_timeframe(self, timeframe: str) -> str:
+        """Format timeframe for LLM prompts and output."""
+        display_timeframe = timeframe
+        if timeframe.endswith("h"):
+            display_timeframe += "our"
+        elif timeframe.endswith("m"):
+            display_timeframe += "in"
+        elif timeframe.endswith("d"):
+            display_timeframe += "ay"
+        elif timeframe == "1w":
+            display_timeframe = "1 week"
+        elif timeframe == "1mo":
+            display_timeframe = "1 month"
+        return display_timeframe
+
+    def dataframe_to_kline_dict(self, df_slice: pd.DataFrame) -> Dict[str, list]:
+        required_columns = ["Datetime", "Open", "High", "Low", "Close"]
+        df_slice_dict = {}
+        for col in required_columns:
+            if col == "Datetime":
+                df_slice_dict[col] = (
+                    df_slice[col].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
+                )
+            else:
+                df_slice_dict[col] = df_slice[col].tolist()
+        return df_slice_dict
+
+    def build_market_snapshot(self, df_slice: pd.DataFrame) -> str:
+        close = df_slice["Close"].astype(float)
+        high = df_slice["High"].astype(float)
+        low = df_slice["Low"].astype(float)
+        latest_close = close.iloc[-1]
+        first_close = close.iloc[0]
+        pct_change = ((latest_close - first_close) / first_close) * 100
+        recent_high = high.max()
+        recent_low = low.min()
+        sma_5 = close.tail(5).mean()
+        sma_20 = close.tail(20).mean() if len(close) >= 20 else close.mean()
+        momentum_5 = ((latest_close - close.iloc[-6]) / close.iloc[-6]) * 100 if len(close) >= 6 else 0
+        range_position = (
+            ((latest_close - recent_low) / (recent_high - recent_low)) * 100
+            if recent_high != recent_low
+            else 50
+        )
+
+        return "\n".join(
+            [
+                f"Latest close: {latest_close:.2f}",
+                f"Period change: {pct_change:.2f}%",
+                f"5-candle momentum: {momentum_5:.2f}%",
+                f"Recent high: {recent_high:.2f}",
+                f"Recent low: {recent_low:.2f}",
+                f"5-candle SMA: {sma_5:.2f}",
+                f"20-candle SMA: {sma_20:.2f}",
+                f"Close position in recent range: {range_position:.1f}%",
+            ]
+        )
+
+    def parse_text_llm_analysis(self, content: str) -> Dict[str, Any]:
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start != -1 and end > start:
+                payload = json.loads(content[start:end])
+                final_decision = payload.get("final_decision", {})
+                if not isinstance(final_decision, dict):
+                    final_decision = {"raw": str(final_decision)}
+                return {
+                    "technical_indicators": payload.get("technical_indicators", ""),
+                    "pattern_analysis": payload.get("pattern_analysis", ""),
+                    "trend_analysis": payload.get("trend_analysis", ""),
+                    "final_decision": final_decision,
+                }
+        except Exception:
+            pass
+
+        return {
+            "technical_indicators": "LLM returned an unstructured response.",
+            "pattern_analysis": "",
+            "trend_analysis": content,
+            "final_decision": {"raw": content},
+        }
+
+    def run_vultr_text_analysis(
+        self, df: pd.DataFrame, asset_name: str, timeframe: str
+    ) -> Dict[str, Any]:
+        """Run a text-first LLM analysis for Vultr DeepSeek models."""
+        df_slice = df.tail(45).reset_index(drop=True)
+        required_columns = ["Datetime", "Open", "High", "Low", "Close"]
+        if not all(col in df_slice.columns for col in required_columns):
+            return {
+                "success": False,
+                "error": f"Missing required columns. Available: {list(df_slice.columns)}",
+            }
+
+        df_slice_dict = self.dataframe_to_kline_dict(df_slice)
+        display_timeframe = self.format_display_timeframe(timeframe)
+        p_image = static_util.generate_kline_image(df_slice_dict)
+        t_image = static_util.generate_trend_image(df_slice_dict)
+
+        api_key = os.environ.get("VULTR_API_KEY") or self.config.get("vultr_api_key", "")
+        if not api_key:
+            return {"success": False, "error": "Vultr Inference API key is not configured."}
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=self.config.get("vultr_base_url", "https://api.vultrinference.com/v1"),
+            timeout=60,
+            max_retries=1,
+        )
+        prompt = f"""
+You are a quantitative trading analyst for Indian equities.
+
+Analyze {asset_name} on the {display_timeframe} timeframe using only the OHLC data and summary below.
+Return valid JSON only with this schema:
+{{
+  "technical_indicators": "concise technical indicator analysis",
+  "pattern_analysis": "candlestick/price-structure pattern analysis",
+  "trend_analysis": "support/resistance and trend bias analysis",
+  "final_decision": {{
+    "forecast_horizon": "next 1-3 candles",
+    "decision": "LONG or SHORT",
+    "justification": "concise reason",
+    "risk_reward_ratio": "float between 1.2 and 1.8"
+  }}
+}}
+
+Market snapshot:
+{self.build_market_snapshot(df_slice)}
+
+Recent OHLC rows:
+{format_kline_rows(df_slice_dict)}
+""".strip()
+
+        response = client.chat.completions.create(
+            model=self.config.get("vultr_model", "deepseek-ai/DeepSeek-V4-Pro"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Return strict JSON. Do not include markdown fences.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=self.config.get("graph_llm_temperature", 0.1),
+            max_tokens=1200,
+        )
+        content = response.choices[0].message.content or ""
+        parsed = self.parse_text_llm_analysis(content)
+
+        final_state = {
+            "indicator_report": parsed["technical_indicators"],
+            "pattern_report": parsed["pattern_analysis"],
+            "trend_report": parsed["trend_analysis"],
+            "final_trade_decision": json.dumps(parsed["final_decision"]),
+            "pattern_image": p_image["pattern_image"],
+            "trend_image": t_image["trend_image"],
+            "pattern_image_filename": "kline_chart.png",
+            "trend_image_filename": "trend_graph.png",
+        }
+
+        return {
+            "success": True,
+            "final_state": final_state,
+            "asset_name": asset_name,
+            "timeframe": display_timeframe,
+            "data_length": len(df_slice),
+        }
+
     def run_analysis(
         self, df: pd.DataFrame, asset_name: str, timeframe: str
     ) -> Dict[str, Any]:
         """Run the trading analysis on the provided DataFrame."""
         try:
+            if self.config.get("agent_llm_provider") == "vultr":
+                return self.run_vultr_text_analysis(df, asset_name, timeframe)
+
             # Debug: Check DataFrame structure
             print(f"DataFrame columns: {df.columns}")
             print(f"DataFrame index: {type(df.index)}")
@@ -339,17 +581,7 @@ class WebTradingAnalyzer:
             print(f"Dictionary key types: {[type(k) for k in df_slice_dict.keys()]}")
 
             # Format timeframe for display
-            display_timeframe = timeframe
-            if timeframe.endswith("h"):
-                display_timeframe += "our"
-            elif timeframe.endswith("m"):
-                display_timeframe += "in"
-            elif timeframe.endswith("d"):
-                display_timeframe += "ay"
-            elif timeframe == "1w":
-                display_timeframe = "1 week"
-            elif timeframe == "1mo":
-                display_timeframe = "1 month"
+            display_timeframe = self.format_display_timeframe(timeframe)
 
             p_image = static_util.generate_kline_image(df_slice_dict)
             t_image = static_util.generate_trend_image(df_slice_dict)
@@ -485,12 +717,12 @@ class WebTradingAnalyzer:
             "90m": {"max_days": 60, "description": "90 minute data: max 60 days"},
             "1h": {"max_days": 730, "description": "1 hour data: max 730 days"},
             "4h": {"max_days": 730, "description": "4 hour data: max 730 days"},
-            "1d": {"max_days": 730, "description": "1 day data: max 730 days"},
-            "5d": {"max_days": 60, "description": "5 day data: max 60 days"},
-            "1w": {"max_days": 730, "description": "1 week data: max 730 days"},
-            "1wk": {"max_days": 730, "description": "1 week data: max 730 days"},
-            "1mo": {"max_days": 730, "description": "1 month data: max 730 days"},
-            "3mo": {"max_days": 730, "description": "3 month data: max 730 days"},
+            "1d": {"max_days": 3650, "description": "1 day data: max 3650 days"},
+            "5d": {"max_days": 3650, "description": "5 day data: max 3650 days"},
+            "1w": {"max_days": 3650, "description": "1 week data: max 3650 days"},
+            "1wk": {"max_days": 3650, "description": "1 week data: max 3650 days"},
+            "1mo": {"max_days": 7300, "description": "1 month data: max 7300 days"},
+            "3mo": {"max_days": 7300, "description": "3 month data: max 7300 days"},
         }
 
         return limits.get(
@@ -502,8 +734,8 @@ class WebTradingAnalyzer:
         start_date: str,
         end_date: str,
         timeframe: str,
-        start_time: str = "00:00",
-        end_time: str = "23:59",
+        start_time: str = "09:00",
+        end_time: str = "16:30",
     ) -> Dict[str, Any]:
         """Validate date and time range for the given timeframe."""
         try:
@@ -548,7 +780,38 @@ class WebTradingAnalyzer:
             if provider is None:
                 provider = self.config.get("agent_llm_provider", "openai")
             
-            if provider == "openai":
+            if provider == "vultr":
+                from openai import OpenAI as _OpenAI
+
+                api_key = os.environ.get("VULTR_API_KEY") or self.config.get(
+                    VULTR_PROVIDER_CONFIG["config_key"], ""
+                )
+                if not api_key:
+                    return {
+                        "valid": False,
+                        "error": "❌ Invalid API Key: The Vultr Inference API key is not set. Please update it in the Settings section.",
+                    }
+
+                client = _OpenAI(
+                    api_key=api_key,
+                    base_url=self.config.get(
+                        VULTR_PROVIDER_CONFIG["base_url_key"],
+                        VULTR_PROVIDER_CONFIG["default_base_url"],
+                    ),
+                    timeout=30,
+                    max_retries=1,
+                )
+                _ = client.chat.completions.create(
+                    model=self.config.get(
+                        VULTR_PROVIDER_CONFIG["model_key"],
+                        VULTR_PROVIDER_CONFIG["validation_model"],
+                    ),
+                    messages=[{"role": "user", "content": "Hello"}],
+                    max_tokens=5,
+                )
+
+                provider_name = "Vultr Inference"
+            elif provider == "openai":
                 from openai import OpenAI
                 client = OpenAI()
                 
@@ -674,7 +937,7 @@ class WebTradingAnalyzer:
     def save_custom_asset(self, symbol: str) -> bool:
         """Save a custom asset symbol persistently (avoid duplicates)."""
         try:
-            symbol = symbol.strip()
+            symbol = self.canonicalize_asset_symbol(symbol)
             if not symbol:
                 return False
             if symbol in self.custom_assets:
@@ -757,9 +1020,9 @@ def analyze():
 
         # Live Yahoo Finance data only
         start_date = data.get("start_date")
-        start_time = data.get("start_time", "00:00")
+        start_time = data.get("start_time", "09:00")
         end_date = data.get("end_date")
-        end_time = data.get("end_time", "23:59")
+        end_time = data.get("end_time", "16:30")
         use_current_time = data.get("use_current_time", False)
 
         # Create datetime objects for validation
@@ -865,11 +1128,18 @@ def save_custom_asset():
         if not symbol:
             return jsonify({"success": False, "error": "Symbol required"}), 400
 
+        symbol = analyzer.canonicalize_asset_symbol(symbol)
         ok = analyzer.save_custom_asset(symbol)
         if not ok:
             return jsonify({"success": False, "error": "Failed to save symbol"}), 500
 
-        return jsonify({"success": True, "symbol": symbol})
+        return jsonify(
+            {
+                "success": True,
+                "symbol": symbol,
+                "yahoo_symbol": analyzer.resolve_asset_to_yahoo_symbol(symbol),
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -879,6 +1149,21 @@ def custom_assets():
     """Return server-persisted custom assets."""
     try:
         return jsonify({"custom_assets": analyzer.custom_assets or []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/indian-symbols", methods=["GET"])
+def indian_symbols():
+    """Return the NSE EQ-series universe as Yahoo Finance symbols."""
+    try:
+        limit = request.args.get("limit", type=int)
+        symbols = load_all_nse_symbols()
+        if limit:
+            symbols = symbols[:limit]
+        return jsonify({"symbols": symbols, "count": len(symbols)})
+    except UniverseLoadError as e:
+        return jsonify({"error": str(e)}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -923,8 +1208,8 @@ def validate_date_range():
         start_date = data.get("start_date")
         end_date = data.get("end_date")
         timeframe = data.get("timeframe")
-        start_time = data.get("start_time", "00:00")
-        end_time = data.get("end_time", "23:59")
+        start_time = data.get("start_time", "09:00")
+        end_time = data.get("end_time", "16:30")
 
         if not all([start_date, end_date, timeframe]):
             return jsonify({"error": "Missing required parameters"})
@@ -994,7 +1279,9 @@ def update_api_key():
         print(f"Updating {provider} API key to: {new_api_key[:8]}...{new_api_key[-4:]}")
 
         # Update the environment variable
-        if provider == "openai":
+        if provider == "vultr":
+            os.environ["VULTR_API_KEY"] = new_api_key
+        elif provider == "openai":
             os.environ["OPENAI_API_KEY"] = new_api_key
         elif provider == "anthropic":
             os.environ["ANTHROPIC_API_KEY"] = new_api_key
@@ -1008,7 +1295,9 @@ def update_api_key():
         set_active_provider(provider)
 
         # Keep analyzer.config in sync for status checks and error messages.
-        if provider == "openai":
+        if provider == "vultr":
+            analyzer.config["vultr_api_key"] = new_api_key
+        elif provider == "openai":
             analyzer.config["api_key"] = new_api_key
         elif provider == "anthropic":
             analyzer.config["anthropic_api_key"] = new_api_key
@@ -1041,7 +1330,11 @@ def get_api_key_status():
         provider = request.args.get("provider", "openai")
         
         # First check environment variables
-        if provider == "openai":
+        if provider == "vultr":
+            api_key = os.environ.get("VULTR_API_KEY", "")
+            if not api_key and hasattr(analyzer, 'config'):
+                api_key = analyzer.config.get("vultr_api_key", "")
+        elif provider == "openai":
             api_key = os.environ.get("OPENAI_API_KEY", "")
             # Fallback to config if not in environment
             if not api_key and hasattr(analyzer, 'config'):
