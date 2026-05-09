@@ -100,7 +100,8 @@ def set_active_provider(provider: str) -> None:
     analyzer.config["agent_llm_provider"] = provider
     analyzer.config["graph_llm_provider"] = provider
     apply_provider_defaults(analyzer.config, provider)
-    analyzer.trading_graph.config.update(analyzer.config)
+    if analyzer.trading_graph is not None:
+        analyzer.trading_graph.config.update(analyzer.config)
 
 
 class WebTradingAnalyzer:
@@ -109,7 +110,7 @@ class WebTradingAnalyzer:
         from default_config import DEFAULT_CONFIG
         # Start with default config (OpenAI)
         self.config = DEFAULT_CONFIG.copy()
-        self.trading_graph = TradingGraph(config=self.config)
+        self.trading_graph = None
         self.data_dir = Path("data")
 
         # Ensure data dir exists
@@ -191,6 +192,14 @@ class WebTradingAnalyzer:
         # Load persisted custom assets
         self.custom_assets_file = self.data_dir / "custom_assets.json"
         self.custom_assets = self.load_custom_assets()
+
+    def ensure_trading_graph(self) -> TradingGraph:
+        """Build the LangGraph LLM pipeline only after credentials are available."""
+        if self.trading_graph is None:
+            self.trading_graph = TradingGraph(config=self.config)
+        else:
+            self.trading_graph.config.update(self.config)
+        return self.trading_graph
 
     def resolve_asset_to_yahoo_symbol(self, symbol: str) -> str:
         """Resolve app asset codes and plain Indian symbols to Yahoo Finance symbols."""
@@ -598,7 +607,8 @@ Recent OHLC rows:
             }
 
             # Run the trading graph
-            final_state = self.trading_graph.graph.invoke(initial_state)
+            trading_graph = self.ensure_trading_graph()
+            final_state = trading_graph.graph.invoke(initial_state)
 
             return {
                 "success": True,
@@ -1239,7 +1249,10 @@ def update_provider():
 
         # Refresh the trading graph with new provider
         try:
-            analyzer.trading_graph.refresh_llms()
+            if analyzer.trading_graph is None:
+                analyzer.ensure_trading_graph()
+            else:
+                analyzer.trading_graph.refresh_llms()
         except ValueError as refresh_error:
             if "API key not found" not in str(refresh_error):
                 raise
@@ -1308,11 +1321,13 @@ def update_api_key():
         elif provider == "minimax_cn":
             analyzer.config["minimax_cn_api_key"] = new_api_key
 
-        analyzer.trading_graph.config.update(analyzer.config)
-
-        # Update the API key in the trading graph and refresh with the active provider.
-        analyzer.trading_graph.update_api_key(new_api_key, provider=provider)
-        analyzer.config.update(analyzer.trading_graph.config)
+        if analyzer.trading_graph is None:
+            analyzer.ensure_trading_graph()
+        else:
+            analyzer.trading_graph.config.update(analyzer.config)
+            # Update the API key in the trading graph and refresh with the active provider.
+            analyzer.trading_graph.update_api_key(new_api_key, provider=provider)
+            analyzer.config.update(analyzer.trading_graph.config)
 
         print(f"{provider} API key updated successfully")
         provider_name = PROVIDER_DISPLAY_NAMES.get(provider, provider)
